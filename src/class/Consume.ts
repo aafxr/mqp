@@ -1,7 +1,18 @@
 import * as amqp from 'amqplib/callback_api'
 import { Socket } from 'socket.io'
+import { Connection } from './Connection2'
+import { EventEmitter } from 'stream'
 
-export class Consume{
+
+
+/**
+ * доступные события: 
+ * - 'ready'
+ * - 'error'
+ * - 'message'
+ * - 'close'
+ */
+export class Consume extends EventEmitter{
     connection: amqp.Connection | undefined
     channel: amqp.Channel | undefined
     queue: amqp.Replies.AssertQueue | undefined
@@ -9,12 +20,12 @@ export class Consume{
     exchangeName = ''
     queueName = ''
 
-    users: Record<string, Socket> = {}
-
     host: string
     port: string
 
+
     constructor(exchange: string, queue: string, host: string, port: string ){
+        super()
         this.exchangeName = exchange
         this.queueName = queue
         this.host = host
@@ -25,51 +36,41 @@ export class Consume{
 
     connect(): Promise<Consume> {
         return new Promise((resolve, reject) => {
-            amqp.connect(`amqp://${this.host}:${this.port}`, (error0, connection) => {
-                if (error0) throw error0;
-                this.connection = connection
+            try{
+                amqp.connect(`amqp://${this.host}:${this.port}`, (error0, connection) => {
+                    if (error0) throw error0;
+                    this.connection = connection
 
-                connection.createChannel((error1, channel) => {
-                    if (error1)  throw error1;
-                    this.channel = channel
+                    connection.createChannel((error1, channel) => {
+                        if (error1)  throw error1;
+                        this.channel = channel
 
-                    channel.prefetch(1)
+                        channel.prefetch(1)
 
-                    channel.assertQueue(this.queueName, {  }, (error3, queue) => {
-                        if(error3) throw error3
-                        channel.bindQueue(queue.queue, this.exchangeName, this.queueName)
-                        this.queue = queue
-                        channel.consume(queue.queue, this.onMessage)
-                        resolve(this)
-                    })
-                }, );
-            });
+                        channel.assertQueue(this.queueName, {  }, (error3, queue) => {
+                            if(error3) throw error3
+                            channel.bindQueue(queue.queue, this.exchangeName, this.queueName)
+                            this.queue = queue
+                            channel.consume(queue.queue, this.onMessage)
+                            this.emit('ready')
+                            resolve(this)
+                        })
+                    }, );
+                });
+            } catch(err) {
+                this.emit('error', err)
+                reject(err)
+            }
         })
     }
 
 
     onMessage(msg:amqp.Message | null){
-        
         if(!msg) return 
         const message = msg.content.toString()
-        console.log('rmq -> ', message, Object.values(this.users).length);
-        Object.values(this.users).forEach(s => s.emit('message', message))
+        console.log('rmq -> ', message);
+        this.emit('message', message)
         this.channel?.ack(msg)
-    }
-
-
-    join(userID: string, socket: Socket){
-        this.users[userID] = socket
-    }
-
-
-    leave(userID:string){
-        if(this.users[userID])
-            delete this.users[userID]
-    }
-
-    usersCount(){
-        return Object.keys(this.users).length
     }
 
 
@@ -83,6 +84,7 @@ export class Consume{
                 this.connection.close()
                 this.connection = undefined
             }
+            this.emit('close')
             resolve(true)
         })
         

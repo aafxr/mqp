@@ -2,9 +2,9 @@ import "dotenv/config";
 
 import { MessageType } from "./types/MessageType";
 import { Server, Socket } from "socket.io";
-import { Rabbit } from "./class";
 import { Publish } from "./class/Publish";
 import { Consume } from "./class/Consume";
+import { Group } from "./class/Group";
 
 const socket_hostname = process.env.SOCKET_HOST as string;
 const rabitmq_hostname = process.env.RABITMQ_HOST as string;
@@ -22,9 +22,11 @@ async function socket_init(){
     
     
     
-    let clients:Record<string, Socket> = {};
+    // let clients:Record<string, Socket> = {};
+
+    const userGroups = new Group<Socket>() 
     
-    let queues: Record<string, Consume> = {}
+    // let queues: Map<string, Consume> = new Map()
     
     const travelPublisher = new Publish('travel', rabitmq_hostname, rabbit_port)
     
@@ -32,21 +34,35 @@ async function socket_init(){
     
     
     async function createNewQueue(queueName: string, userID?:string, socket?: Socket){
-        queues[queueName] = new Consume('travel', queueName, rabitmq_hostname, rabbit_port)
-        if(userID && socket) queues[queueName].join(userID, socket)
-        await queues[queueName].connect()
+        const c = new Consume('travel', queueName, rabitmq_hostname, rabbit_port)
+        // queues.set(queueName, c) 
+
+        // c.on('close', () => queues.delete(queueName))
+
+        c.on('message', function(msg){
+            const g = userGroups.getItems(c.queueName)
+            if(g) g.forEach(s => s.send(msg))
+        })
+        
+        c.on('close', () => userGroups.clearGroup(c.queueName))
+        if(socket) userGroups.add(queueName, socket)
+        await c.connect()
+        return c
     }
     
     
     io.on("connection", (socket) => {
-        clients[socket.id] = socket
+        // clients[socket.id] = socket
     
         socket.on("join", async (msg: MessageType) => {
             try {
                 if ('join' in msg) {
                     const travelID = msg.join?.travelID
-                    if(!travelID) return 
-                    await createNewQueue(travelID, socket.id, socket)
+                    if(!travelID) return
+                    if(!userGroups.hasGroup(travelID)) await createNewQueue(travelID, socket.id, socket)
+                else {
+                    userGroups.add(travelID, socket)
+                }
                 }
             } catch (error) {
                 console.log((<Error>error).message)
@@ -59,14 +75,8 @@ async function socket_init(){
             try {
                 if('leave' in msg){
                     const travelID = msg.leave?.travelID
-                    if(!travelID) return 
-                    const q = queues[travelID]
-                    if(!q) return 
-                    q.leave(socket.id)
-                    if(q.usersCount() === 0) {
-                        q.close()
-                        delete queues[travelID]
-                    }
+                    if(!travelID) return
+                    if(userGroups.isInGroup(travelID, socket)) userGroups.delete(travelID, socket)
                 }
             } catch (error) {
                 console.log((<Error>error).message)
@@ -78,17 +88,14 @@ async function socket_init(){
             try {
                 if (!travelPublisherReady) {
                     console.log('Publisher not ready');
-                    
                     return 
                 }
+
                 if('message' in msg){
                     const travelID = msg.message?.primary_entity_id
-                    if(travelID) {
-                        const sending = travelPublisher.send(msg, travelID)
-                        console.log(`${sending ? '[x] Done, ': '[ ] Fail, '}${JSON.stringify(msg)}`)
-                        console.log(travelPublisher.errorMessage);
-                        
-                    }
+                    if(travelID) travelPublisher.send(msg, travelID)
+                        // console.log(`${sending ? '[x] Done, ': '[ ] Fail, '}${JSON.stringify(msg)}`)
+                        // console.log(travelPublisher.errorMessage);
                     return 
                 }
             } catch (error) {
@@ -97,20 +104,18 @@ async function socket_init(){
         });
     
         socket.on("disconnect", () => {
-            if(clients[socket.id] ) {
-                delete clients[socket.id]
-            }
+            userGroups.deleteFromAllGroups(socket)
         });
     });
 
-    setInterval(() => {
-        const users = Object.keys(clients)
-        console.log('users count: ', users.length);
-        const qq = Object.keys(queues)
-        console.log('Queues count: ', qq.length)
-        console.log(qq);
+    // setInterval(() => {
+        // const users = Object.keys(clients)
+        // console.log('users count: ', users.length);
+        // const qq = Object.keys(queues)
+        // console.log('Queues count: ', qq.length)
+        // console.log(qq);
         
-    }, 10 * 1000)
+    // }, 10 * 1000)
 
 }
 
