@@ -111,6 +111,17 @@ async function socket_init() {
             }
         });
 
+        socket.on('action', (a: string) => {
+            try {
+                const action = JSON.parse(a)
+                if(action.entity === 'Travel'){
+                    travelPublisher.send(action, action.entity)
+                }
+            }catch(e){
+                console.log((<Error>e).message)
+            }
+        })
+
         socket.on("disconnect", () => {
             userGroups.deleteFromAllGroups(socket)
         });
