@@ -15,20 +15,24 @@ const rabbit_port = process.env.RABBIT_PORT as string;
 
 
 async function socket_init() {
-    // const httpServer = createServer(
-    //     {
-    //         key: fs.readFileSync("/var/socket/build/key.pem"),
-    //         cert: fs.readFileSync("/var/socket/build/cert.pem"),
-    //         passphrase: 'socket123456'
-    //     }
-    // )
-    // const io = new Server(httpServer);
-    const io = new Server(Number(socket_port), {
+    const httpServer = createServer(
+        {
+            key: fs.readFileSync("/etc/letsencrypt/live/srv.travelerapp.ru/privkey.pem"),
+            cert: fs.readFileSync("/etc/letsencrypt/live/srv.travelerapp.ru/fullchain.pem")
+        }
+    )
+    const io = new Server(httpServer, {
         cors: {
-            origin: `*`,
+            origin: `https://travelerapp.ru`,
             methods: ["GET", "POST"]
         },
     });
+    // const io = new Server(Number(socket_port), {
+    //     cors: {
+    //         origin: `*`,
+    //         methods: ["GET", "POST"]
+    //     },
+    // });
 
 
     const userGroups = new Group<Socket>()
@@ -127,7 +131,7 @@ async function socket_init() {
         });
     });
 
-    // httpServer.listen(Number(socket_port))
+    httpServer.listen(Number(socket_port))
 }
 
 
